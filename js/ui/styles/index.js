@@ -1,9 +1,19 @@
+// Derive the extension name from the URL this script was loaded from,
+// so it works whether the folder is "ComfyUI_ControlFreak" or "comfyui_controlfreak".
+const _extensionName = (() => {
+    try {
+        const url = import.meta.url;
+        const match = url.match(/\/extensions\/([^/]+)\//);
+        if (match) return match[1];
+    } catch (e) {}
+    return 'comfyui_controlfreak';
+})();
+
 function loadCssWithComfyApi(relativePath) {
     try {
         if (window.comfyAPI?.utils?.addStylesheet) {
-            const cssUrlPath = `/extensions/ComfyUI_ControlFreak/ui/styles/${relativePath}`;
+            const cssUrlPath = `/extensions/${_extensionName}/ui/styles/${relativePath}`;
             window.comfyAPI.utils.addStylesheet(cssUrlPath);
-            // console.log(`ControlFreak: Requested loading CSS ${cssUrlPath} via ComfyAPI`);
         } else {
             console.warn(`ControlFreak: comfyAPI.utils.addStylesheet not found. Cannot load ${relativePath} dynamically.`);
         }
