@@ -234,7 +234,8 @@ The following controller types are planned for future releases, depending on the
 ## Next Steps
 
 - Consolidate css
-- Await feedback 
+- Await feedback
+- Add toggle mute/bypass node mapping 
 
 ## Contributing / Extending with New Controller Types
 
