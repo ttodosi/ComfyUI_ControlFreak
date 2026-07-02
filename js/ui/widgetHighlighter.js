@@ -92,7 +92,8 @@ function removeWidgetHighlightPatch() {
         LiteGraph.LGraphCanvas.prototype.drawNodeWidgets = original_drawNodeWidgets;
         original_drawNodeWidgets = null;
         // Request redraw to remove highlights
-        if(app.graph) app.graph.setDirtyCanvas(true, true);
+        const graph = app.canvas?.graph;
+        if(graph) graph.setDirtyCanvas(true, true);
     }
 }
 
@@ -111,8 +112,9 @@ export function initWidgetHighlighter() {
     // Listen for events that change mappings and trigger redraw
     const redrawCanvas = () => {
         // Check if graph exists and has changed before forcing redraw
-        if(app.graph) { // && app.graph.status !== LGraph.STATUS_STOPPED - add if needed
-            app.graph.setDirtyCanvas(true, false); // Redraw only, don't recompute paths
+        const graph = app.canvas?.graph;
+        if(graph) { // && graph.status !== LGraph.STATUS_STOPPED - add if needed
+            graph.setDirtyCanvas(true, false); // Redraw only, don't recompute paths
         }
     };
 

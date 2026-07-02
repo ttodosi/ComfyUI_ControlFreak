@@ -9,7 +9,7 @@ import { GamepadController } from './controllers/gamepad.js';
 import { MappingEngine } from './core/mappingEngine.js';
 import { WorkflowIntegration } from './core/workflowIntegration.js';
 import { showNotification } from './ui/notifications.js';
-import { registerNodeContextMenu } from './ui/contextMenu.js';
+import { getControlFreakWidgetMenuItems } from './ui/contextMenu.js';
 import { addControllerButton } from './ui/controllerButton.js';
 
 import { contextProvider } from './core/contextProvider.js';
@@ -76,12 +76,6 @@ function initializeControllerUIHandlers() {
 
 // Add a handler for workflow events
 function setupWorkflowEventHandlers() {
-    // Check if we have access to the LiteGraph graph
-    if (!app || !app.graph) {
-        console.warn("ControlFreak: Can't set up workflow event handlers - app or graph not available");
-        return;
-    }
-
     // Use ComfyUI's registerExtension API for graph events
     app.registerExtension({
         name: "ControlFreak.WorkflowEvents",
@@ -96,9 +90,10 @@ function setupWorkflowEventHandlers() {
                 mappingEngine.setActiveProfile('default');
                 
                 // Clear any stored data
-                if (app.graph) {
-                    if (!app.graph.extra) app.graph.extra = {};
-                    app.graph.extra.controlFreak = {
+                const graph = app.canvas?.graph;
+                if (graph) {
+                    if (!graph.extra) graph.extra = {};
+                    graph.extra.controlFreak = {
                         activeProfile: 'default',
                         mappings: []
                     };
@@ -112,7 +107,8 @@ function setupWorkflowEventHandlers() {
             // Use a small delay to ensure the graph is fully loaded
             setTimeout(() => {
                 const mappingEngine = contextProvider.get('mappingEngine');
-                if (mappingEngine && app.graph) {
+                const graph = app.canvas?.graph;
+                if (mappingEngine && graph) {
                     mappingEngine.loadMappings();
                 }
             }, 300);
@@ -124,14 +120,31 @@ function setupWorkflowEventHandlers() {
 function setupControllerEventListeners(midiController, gamepadController) {
     // Setup event listeners for controllers to feed into the mapping engine via event bus
     midiController.onMessage(message => {
+        const status = message.command & 0xF0;
+        const isNoteOn = status === 0x90 && message.value > 0;
+        const isNoteOff = status === 0x80 || (status === 0x90 && message.value === 0);
+        const isCC = status === 0xB0;
+
+        // Use a stable control id for MIDI notes so Note On and Note Off hit the
+        // same mapping. Without this, toggle mappings latch on after Note On and
+        // never see release because Note Off used a different command/control id.
+        const controlId = (isNoteOn || isNoteOff)
+            ? `note_${message.control}`
+            : isCC
+                ? `cc_${message.control}`
+                : `${status}_${message.control}`;
+        const type = (isNoteOn || isNoteOff) ? 'midi_note' : isCC ? 'midi_cc' : 'midi';
+        const rawValue = isNoteOff ? 0 : message.value;
+        const controlKind = (isNoteOn || isNoteOff) ? 'Note' : isCC ? 'CC' : 'Control';
+
         // Format MIDI message for the mapping engine
         const controlInput = {
-            type: 'midi', // Or more specific like 'midi_cc', 'midi_note'
+            type,
             deviceId: message.deviceId, // Use the actual device ID from the Web MIDI API
-            controlId: `${message.command}_${message.control}`, // e.g., "176_7" for CC 7
-            rawValue: message.value,
+            controlId,
+            rawValue,
             deviceName: message.deviceName,
-            name: `MIDI ${message.command === 144 ? 'Note' : 'CC'} ${message.control}`
+            name: `MIDI ${controlKind} ${message.control}`
         };
         
         // Publish to event bus
@@ -188,7 +201,8 @@ function setupControllerEventListeners(midiController, gamepadController) {
 
 // Wait for graph to be available before loading mappings
 function waitForGraph() {
-    if (app && app.graph && app.graph.nodes) {
+    const graph = app.canvas?.graph;
+    if (graph && graph.nodes) {
         try {
             const mappingEngine = contextProvider.get('mappingEngine');
             if (mappingEngine) {
@@ -225,13 +239,13 @@ export { midiController, gamepadController, mappingEngine };
 app.registerExtension({
     name: "Comfy.ControlFreak.Client",
     priority: 1000,
+    getNodeMenuItems(node) {
+        return getControlFreakWidgetMenuItems(node);
+    },
     async setup(appInstance) {
         try {
             // Initialize core components first
             await initializeControlFreak();
-            
-            // Initialize all UI components here after core is ready
-            registerNodeContextMenu(appInstance);
             
             // Add the button using the ComfyUI-Manager approach
             await addControllerButton();

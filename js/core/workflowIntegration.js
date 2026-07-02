@@ -11,9 +11,14 @@ export class WorkflowIntegration {
     constructor(appInstance, mappingEngine) {
         this.app = appInstance || app;
         this.mappingEngine = mappingEngine;
+        this.graphToJSONPatched = false;
         
-        // Set up event listeners for graph changes
+        // Set up event listeners
         this._setupEventListeners();
+    }
+
+    _getGraph() {
+        return this.app?.canvas?.graph || null;
     }
     
     /**
@@ -21,10 +26,18 @@ export class WorkflowIntegration {
      * @private
      */
     _setupEventListeners() {
+        if (this.graphToJSONPatched) return;
+
+        const graph = this._getGraph();
+        if (!graph?.toJSON) {
+            setTimeout(() => this._setupEventListeners(), 500);
+            return;
+        }
+
         // Add event listener for when graph is exported to JSON
-        const originalGraphToJSON = this.app.graph.toJSON;
-        this.app.graph.toJSON = (data) => {
-            const result = originalGraphToJSON.call(this.app.graph, data);
+        const originalGraphToJSON = graph.toJSON;
+        graph.toJSON = (data) => {
+            const result = originalGraphToJSON.call(graph, data);
             
             try {
                 // Add our mappings data to the workflow JSON
@@ -56,6 +69,8 @@ export class WorkflowIntegration {
             
             return result;
         };
+
+        this.graphToJSONPatched = true;
     }
     
     /**
@@ -95,11 +110,12 @@ export class WorkflowIntegration {
      * Call this when mappings have changed to update the workflow JSON
      */
     syncProfileToWorkflow() {
-        if (!this.app || !this.app.graph) return;
+        const graph = this._getGraph();
+        if (!graph) return;
         
         try {
-            if (!this.app.graph.extra) {
-                this.app.graph.extra = {};
+            if (!graph.extra) {
+                graph.extra = {};
             }
             
             // Get the mapping engine to export mappings
@@ -109,7 +125,7 @@ export class WorkflowIntegration {
                 
                 // Only update if we have mappings
                 if (mappings && mappings.length > 0) {
-                    this.app.graph.extra.controlFreak = {
+                    graph.extra.controlFreak = {
                         activeProfile: engine.getActiveProfile(),
                         mappings: mappings
                     };
@@ -118,7 +134,7 @@ export class WorkflowIntegration {
                     this._addMarkerNodeToGraph();
                     
                     // Trigger a graph change event so it gets saved
-                    this.app.graph.change();
+                    graph.change();
                     
                     // Emit event for profile synced to workflow
                     eventBus.emit('workflow:profileSynced', {
@@ -137,9 +153,12 @@ export class WorkflowIntegration {
      * @private
      */
     _addMarkerNodeToGraph() {
+        const graph = this._getGraph();
+        if (!graph) return;
+
         try {
             // Check if the marker node already exists in the graph
-            const hasMarkerNode = this.app.graph.nodes.some(node => 
+            const hasMarkerNode = graph.nodes.some(node =>
                 node.type === "ControlFreak"
             );
             
@@ -150,7 +169,7 @@ export class WorkflowIntegration {
                 // Position off-screen
                 node.pos = [-9999, -9999];
                 // Add to graph
-                this.app.graph.add(node);
+                graph.add(node);
             }
         } catch (error) {
             console.error("WorkflowIntegration: Error adding marker node to graph:", error);
@@ -162,10 +181,12 @@ export class WorkflowIntegration {
      * Call this when a workflow is loaded to get the mapping data
      */
     syncProfileFromWorkflow() {
-        if (!this.app?.graph?.extra?.controlFreak) return;
+        const graph = this._getGraph();
+        const controlFreakData = graph?.extra?.controlFreak;
+        if (!controlFreakData) return;
         
         try {
-            const workflowData = this.app.graph.extra.controlFreak;
+            const workflowData = controlFreakData;
             
             // Get the mapping engine
             const engine = this.mappingEngine || contextProvider.get('mappingEngine');

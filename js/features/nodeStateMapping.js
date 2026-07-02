@@ -13,7 +13,6 @@ import { showNotification } from "../ui/notifications.js";
 import { createMappingList } from "../ui/mappingComponent.js";
 
 const FEATURE_FLAG = "__controlFreakNodeStateMappingFeature";
-const MENU_PATCH_FLAG = "__controlFreakNodeStateMenuPatched";
 const ENGINE_PATCH_FLAG = "__controlFreakNodeStateEnginePatched";
 const DIALOG_ID = "controlfreak-node-state-learning-dialog";
 const PASS_FIELD = "pass";
@@ -153,8 +152,9 @@ function setNodeState(node, stateField, active) {
     if (app.canvas && typeof app.canvas.setDirty === "function") {
         app.canvas.setDirty(true, true);
     }
-    if (app.graph && typeof app.graph.change === "function") {
-        app.graph.change();
+    const graph = app.canvas?.graph;
+    if (graph && typeof graph.change === "function") {
+        graph.change();
     }
 
     return true;
@@ -164,7 +164,8 @@ function applyNodeStateMapping(engine, mapping, rawInputValue) {
     const info = getNodeStateInfo(mapping);
     if (!info || typeof rawInputValue === "undefined") return false;
 
-    const node = app.graph?.getNodeById?.(+info.nodeId);
+    const graph = app.canvas?.graph;
+    const node = graph?.getNodeById?.(+info.nodeId);
     if (!node) {
         console.warn(`ControlFreak: Node ${info.nodeId} not found for ${info.stateField} mapping.`);
         return true;
@@ -222,90 +223,20 @@ function patchMappingEngine() {
     mappingEngine[ENGINE_PATCH_FLAG] = true;
 }
 
-function addNodeStateMenuEntries(menuOptions, node) {
-    if (!Array.isArray(menuOptions) || !node) return menuOptions;
+export function getNodeStateMenuItems(node) {
+    if (!node) return [];
 
-    let controlFreakMenu = menuOptions.find(option =>
-        option &&
-        typeof option.content === "string" &&
-        option.content.includes("Control") &&
-        option.content.includes("Freak") &&
-        option.content.includes("Map Control") &&
-        option.submenu
-    );
-
-    if (!controlFreakMenu) {
-        menuOptions.push(null);
-        controlFreakMenu = {
-            content: `Control<span style="color: var(--cf-brand-primary); font-style: italic;">Freak</span>: Map Control...`,
-            submenu: { options: [] },
-        };
-        menuOptions.push(controlFreakMenu);
-    }
-
-    if (!controlFreakMenu.submenu) {
-        controlFreakMenu.submenu = { options: [] };
-    }
-    if (!Array.isArray(controlFreakMenu.submenu.options)) {
-        controlFreakMenu.submenu.options = [];
-    }
-
-    const submenuOptions = controlFreakMenu.submenu.options;
-    const alreadyAdded = submenuOptions.some(option =>
-        option && typeof option.content === "string" && option.content === "Mute Node"
-    );
-    if (alreadyAdded) return menuOptions;
-
-    if (submenuOptions.length > 0) {
-        submenuOptions.push(null);
-    }
-
-    submenuOptions.push(createNodeStateFieldMenu(node, "mute"));
-    submenuOptions.push(createNodeStateFieldMenu(node, PASS_FIELD));
-
-    return menuOptions;
+    return [
+        createQuickMapNodeStateMenuItem(node, "mute"),
+        createQuickMapNodeStateMenuItem(node, PASS_FIELD),
+    ];
 }
 
-function createNodeStateFieldMenu(node, stateField) {
-    const label = `${getFieldLabel(stateField)} Node`;
+function createQuickMapNodeStateMenuItem(node, stateField) {
     return {
-        content: label,
-        submenu: {
-            options: [
-                {
-                    content: "Standard Map...",
-                    callback: () => startNodeStateStandardMapping(node, stateField),
-                },
-                {
-                    content: "Quick Map",
-                    callback: () => startNodeStateQuickMapping(node, stateField),
-                },
-            ],
-        },
+        content: `ControlFreak: Quickmap ${getFieldLabel(stateField)}`,
+        callback: () => startNodeStateQuickMapping(node, stateField),
     };
-}
-
-function patchContextMenu() {
-    if (!window.LGraphCanvas?.prototype) {
-        console.warn("ControlFreak: LGraphCanvas not available, cannot add node-state mapping menu.");
-        return;
-    }
-
-    const proto = window.LGraphCanvas.prototype;
-    if (proto[MENU_PATCH_FLAG]) return;
-
-    const originalGetNodeMenuOptions = proto.getNodeMenuOptions;
-    proto.getNodeMenuOptions = function getNodeMenuOptionsWithNodeState(node) {
-        const options = originalGetNodeMenuOptions.call(this, node);
-        try {
-            addNodeStateMenuEntries(options, node);
-        } catch (error) {
-            console.error("ControlFreak: Error adding node-state mapping menu entries:", error);
-        }
-        return options;
-    };
-
-    proto[MENU_PATCH_FLAG] = true;
 }
 
 function findExistingNodeStateMappings(node, stateField) {
@@ -503,7 +434,10 @@ function handleDetectedControl(controlInput) {
     if (featureState.quickLearning) {
         const { node, stateField } = featureState.quickLearning;
         featureState.quickLearning = null;
-        createNodeStateMapping(node, stateField, controlInput, "toggle", false);
+        // Quick node-state mappings are direct by default: controller value above
+        // threshold enables mute/bypass, value below threshold restores the node.
+        // This matches MIDI toggle buttons that alternate 127/0.
+        createNodeStateMapping(node, stateField, controlInput, "direct", false);
         return;
     }
 
@@ -621,7 +555,6 @@ export function registerNodeStateMappingFeature() {
     }
 
     patchMappingEngine();
-    patchContextMenu();
     installControllerInputListener();
 
     eventBus.on("mappings:loaded", patchMappingEngine);
